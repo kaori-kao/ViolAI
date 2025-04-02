@@ -1,0 +1,77 @@
+name: violin_coach_app
+description: A comprehensive AI-powered violin learning platform that uses computer vision to provide real-time feedback on posture, bowing technique, and musical performance.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.19.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  
+  # State management
+  provider: ^6.0.5
+  
+  # Database and storage
+  sqflite: ^2.2.8+4
+  path: ^1.8.3
+  shared_preferences: ^2.1.1
+  
+  # UI components
+  flutter_svg: ^2.0.5
+  fl_chart: ^0.62.0
+  table_calendar: ^3.0.9
+  
+  # Network and API
+  http: ^0.13.6
+  dio: ^5.1.2
+  
+  # Computer vision and ML
+  tflite_flutter: ^0.10.1
+  camera: ^0.10.5
+  image: ^4.0.17
+  
+  # Audio processing
+  flutter_sound: ^9.2.13
+  permission_handler: ^10.2.0
+  
+  # Utils
+  uuid: ^3.0.7
+  intl: ^0.18.1
+  logger: ^1.3.0
+  path_provider: ^2.0.15
+  equatable: ^2.0.5
+  
+  # Firebase (for optional cloud sync)
+  firebase_core: ^2.13.0
+  firebase_auth: ^4.6.1
+  cloud_firestore: ^4.7.1
+  firebase_storage: ^11.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+  build_runner: ^2.4.4
+  mockito: ^5.4.0
+  test: ^1.24.1
+
+flutter:
+  uses-material-design: true
+  
+  # Assets
+  assets:
+    - assets/images/
+    - assets/models/
+  
+  # Fonts
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+        - asset: assets/fonts/Roboto-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Roboto-Bold.ttf
+          weight: 700

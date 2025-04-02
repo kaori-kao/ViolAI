@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.flutter
     pkgs.glibcLocales
     pkgs.postgresql
     pkgs.libGLU
