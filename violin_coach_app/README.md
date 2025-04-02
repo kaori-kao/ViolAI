@@ -25,7 +25,7 @@ A comprehensive AI-powered violin learning platform that uses computer vision to
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/violin_coach_app.git
+   git clone https://github.com/kaori-kao/violin_coach_app.git
    cd violin_coach_app
    ```
 
