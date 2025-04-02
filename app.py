@@ -17,7 +17,15 @@ st.set_page_config(
     page_title="Violin Coach",
     page_icon="🎻",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': 'https://docs.streamlit.io',
+        'Report a bug': "https://github.com/your-repo/violin-coach/issues",
+        'About': """
+        # Violin Coach App
+        A computer vision application that helps violin students improve their posture and bowing technique.
+        """
+    }
 )
 
 # Initialize session state variables
@@ -128,29 +136,68 @@ def draw_feedback_on_frame(frame, bow_direction, posture_status, rhythm_progress
     """Draw feedback information on the video frame"""
     h, w = frame.shape[:2]
     
-    # Draw bow direction indicator
-    direction_color = (0, 255, 0) if bow_direction == "Up bow" else (0, 0, 255)  # Green for up bow, Red for down bow
-    cv2.putText(frame, f"Bow: {bow_direction}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, direction_color, 2)
+    # Add header/title
+    cv2.rectangle(frame, (0, 0), (w, 80), (50, 50, 50), -1)  # Dark background for header
+    cv2.putText(frame, "Violin Coach", (w//2 - 80, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
     
-    # Draw posture indicator
-    posture_color = (0, 255, 0) if posture_status == "Good" else (0, 0, 255)  # Green for good, Red for needs adjustment
-    cv2.putText(frame, f"Posture: {posture_status}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, posture_color, 2)
+    # Draw bow direction indicator with enhanced visibility
+    if bow_direction == "Up bow":
+        direction_color = (0, 255, 0)  # Green for up bow
+        direction_icon = "↑"
+    elif bow_direction == "Down bow":
+        direction_color = (0, 0, 255)  # Red for down bow
+        direction_icon = "↓"
+    else:
+        direction_color = (200, 200, 200)  # Gray for other states
+        direction_icon = "•"
+        
+    cv2.putText(frame, f"Bow: {bow_direction} {direction_icon}", (10, 110), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, direction_color, 2)
     
-    # Draw rhythm progress bar
+    # Draw posture indicator with improved visualization
+    if posture_status == "Good":
+        posture_color = (0, 255, 0)  # Green for good
+        posture_emoji = "✓"
+    else:
+        posture_color = (0, 0, 255)  # Red for needs adjustment
+        posture_emoji = "✗"
+        
+    cv2.putText(frame, f"Posture: {posture_status} {posture_emoji}", (10, 140), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, posture_color, 2)
+    
+    # Draw expected bow direction for next move
+    if rhythm_progress < 32:
+        expected_direction = "Down bow" if rhythm_progress % 2 == 0 else "Up bow"
+        expected_icon = "↓" if expected_direction == "Down bow" else "↑"
+        cv2.putText(frame, f"Next: {expected_direction} {expected_icon}", (10, 170),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 165, 0), 2)  # Orange for next move
+    
+    # Draw rhythm progress bar with improved appearance
     bar_width = int(w * 0.8)
-    bar_height = 20
+    bar_height = 30
     bar_x = int(w * 0.1)
-    bar_y = h - 40
-    # Background
-    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (200, 200, 200), -1)
-    # Progress
+    bar_y = h - 50
+    
+    # Background with slightly rounded corners
+    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (70, 70, 70), -1)
+    
+    # Progress with gradient colors based on completion
     progress_width = int(bar_width * (rhythm_progress / 32))
-    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + progress_width, bar_y + bar_height), (0, 255, 0), -1)
+    if progress_width > 0:
+        # Gradient from blue to green based on progress
+        if rhythm_progress < 16:
+            progress_color = (255, 128, 0)  # Orange for first half
+        else:
+            progress_color = (0, 255, 0)    # Green for second half
+            
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + progress_width, bar_y + bar_height), progress_color, -1)
+    
     # Border
-    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (0, 0, 0), 1)
-    # Text
-    cv2.putText(frame, f"Progress: {rhythm_progress}/32", (bar_x, bar_y - 10), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (200, 200, 200), 2)
+    
+    # Text above the progress bar
+    cv2.putText(frame, f"Progress: {rhythm_progress}/32 - Twinkle Twinkle Little Star", 
+                (bar_x, bar_y - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     
     return frame
 
@@ -341,7 +388,11 @@ else:  # Tracking mode
 
 # Info section in sidebar
 with st.sidebar:
-    st.header("Violin Coach - Help")
+    st.header("🎻 Violin Coach - Help")
+    
+    # Add app logo/image
+    st.image("violin_image.jpg", width=200)
+    
     st.markdown("""
     ### How to use this app:
     
@@ -356,21 +407,32 @@ with st.sidebar:
        - For rhythm training, follow the Twinkle Twinkle pattern
     
     3. **Feedback System**:
-       - Green indicators = good
-       - Red indicators = needs adjustment
-       - Progress bar shows your position in the song
+       - 🟢 Green indicators = good
+       - 🔴 Red indicators = needs adjustment
+       - The progress bar shows your position in the song
     
     ### Tips for best results:
     - Wear clothing that contrasts with your background
     - Find a well-lit area with minimal background movement
     - Position yourself 3-6 feet from the camera
-    - The full upper body should be visible in the frame
+    - Make sure your full upper body is visible in the frame
+    - Use a plain background for better detection accuracy
     """)
+    
+    # Add expandable section for advanced tips
+    with st.expander("Advanced Tips"):
+        st.markdown("""
+        - For best posture detection, stand straight with your shoulders aligned
+        - When calibrating finger positions, maintain a natural hand position
+        - The bow detection works best when your bow arm is clearly visible against the background
+        - If detection is unstable, try wearing contrasting colors for better visibility
+        - Adjust lighting to reduce shadows on your face and arms
+        """)
 
-    # Version info
+    # Version info with improved styling
     st.markdown("---")
-    st.markdown("Version 1.0")
-    st.markdown("© 2023 Violin Coach")
+    st.markdown("<h4 style='text-align: center;'>Violin Coach v2.0</h4>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>© 2025 Violin Coach</p>", unsafe_allow_html=True)
 
 # Start the camera automatically if in tracking mode with calibration complete
 if st.session_state.mode == "tracking" and st.session_state.calibration_complete and not st.session_state.camera_started:

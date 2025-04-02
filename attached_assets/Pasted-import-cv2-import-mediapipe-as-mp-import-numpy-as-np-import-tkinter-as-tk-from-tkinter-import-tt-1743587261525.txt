@@ -1,0 +1,310 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+import tkinter as tk
+from tkinter import ttk
+import threading
+from queue import Queue
+from PIL import Image, ImageTk
+import time
+import math
+
+class ViolinBowTracker:
+    def __init__(self, window):
+        self.window = window
+        self.window.title("Violin Bow Tracker (Elbow Angle)")
+        self.window.geometry("1000x700")
+        
+        # Bow tracking variables
+        self.bow_direction = None  # 'up' or 'down'
+        self.last_elbow_angle = None
+        self.bow_change_count = 0
+        self.song_position = 0
+        self.last_bow_change_time = time.time()
+        self.angle_history = []
+        
+        # Suzuki Book 1 - Twinkle Twinkle Little Star rhythm pattern
+        self.twinkle_pattern = [
+            'D', 'U', 'D', 'U',  # Twinkle twinkle
+            'D', 'U', 'D', 'U',  # Little star
+            'D', 'D', 'U', 'U',  # How I wonder
+            'D', 'U', 'D', 'U',  # What you are
+            'D', 'D', 'U', 'U',  # Up above the
+            'D', 'U', 'D', 'U',  # World so high
+            'D', 'D', 'U', 'U',  # Like a diamond
+            'D', 'U', 'D', 'U'   # In the sky
+        ]
+        
+        # Initialize MediaPipe models
+        self.mp_pose = mp.solutions.pose
+        self.mp_hands = mp.solutions.hands
+        self.pose = self.mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.5)
+        self.hands = self.mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.5)
+        self.mp_drawing = mp.solutions.drawing_utils
+        
+        # Setup UI
+        self.setup_ui()
+        
+        # Video capture
+        self.running = False
+        self.video_queue = Queue(maxsize=1)
+        
+        # Start the video update loop
+        self.update_video_display()
+    
+    def setup_ui(self):
+        """Setup the user interface"""
+        self.style = ttk.Style()
+        self.style.configure('TFrame', background="#f0f0f0")
+        self.style.configure('TButton', font=('Helvetica', 10), padding=5)
+        self.style.configure('Header.TLabel', font=('Helvetica', 12, 'bold'))
+        
+        # Main frame
+        self.main_frame = ttk.Frame(self.window, padding=10)
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Video display
+        self.video_frame = ttk.LabelFrame(self.main_frame, text="Elbow Angle Tracking", padding=10)
+        self.video_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.canvas = tk.Canvas(self.video_frame, width=800, height=500, bg='black')
+        self.canvas.pack()
+        
+        # Controls
+        control_frame = ttk.Frame(self.main_frame)
+        control_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Button(control_frame, text="Start", command=self.start_tracking).pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame, text="Stop", command=self.stop_tracking).pack(side=tk.LEFT, padx=5)
+        ttk.Button(control_frame, text="Reset", command=self.reset_tracking).pack(side=tk.LEFT, padx=5)
+        
+        # Status display
+        status_frame = ttk.Frame(self.main_frame)
+        status_frame.pack(fill=tk.X, pady=10)
+        
+        self.elbow_label = ttk.Label(status_frame, text="Elbow Angle: --°", style='Header.TLabel')
+        self.elbow_label.pack(side=tk.LEFT, padx=10)
+        
+        self.bow_label = ttk.Label(status_frame, text="Bow: --", style='Header.TLabel')
+        self.bow_label.pack(side=tk.LEFT, padx=10)
+        
+        self.rhythm_label = ttk.Label(status_frame, text="Next: --", style='Header.TLabel')
+        self.rhythm_label.pack(side=tk.LEFT, padx=10)
+        
+        self.song_label = ttk.Label(status_frame, text="Position: 0/32", style='Header.TLabel')
+        self.song_label.pack(side=tk.LEFT, padx=10)
+        
+        # Feedback text
+        self.feedback_text = tk.Text(self.main_frame, height=4, wrap=tk.WORD)
+        self.feedback_text.pack(fill=tk.X, pady=10)
+        self.feedback_text.insert(tk.END, "Start playing Twinkle Twinkle Little Star...")
+        self.feedback_text.config(state=tk.DISABLED)
+    
+    def start_tracking(self):
+        """Start the bow tracking"""
+        if not self.running:
+            self.running = True
+            self.video_thread = threading.Thread(target=self.video_processing_loop, daemon=True)
+            self.video_thread.start()
+            self.update_feedback("Tracking started. Play Twinkle Twinkle Little Star.")
+    
+    def stop_tracking(self):
+        """Stop the bow tracking"""
+        self.running = False
+        self.update_feedback("Tracking stopped.")
+    
+    def reset_tracking(self):
+        """Reset the tracking"""
+        self.song_position = 0
+        self.bow_change_count = 0
+        self.last_elbow_angle = None
+        self.angle_history = []
+        self.update_bow_display()
+        self.update_feedback("Tracking reset. Ready to start again.")
+    
+    def video_processing_loop(self):
+        """Video processing loop running in a separate thread"""
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 800)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 500)
+        
+        while self.running and cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
+            frame = cv2.flip(frame, 1)
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Process pose and hands
+            pose_results = self.pose.process(rgb_frame)
+            hand_results = self.hands.process(rgb_frame)
+            
+            if pose_results.pose_landmarks:
+                # Draw pose landmarks
+                self.mp_drawing.draw_landmarks(
+                    frame, pose_results.pose_landmarks,
+                    self.mp_pose.POSE_CONNECTIONS,
+                    landmark_drawing_spec=mp.solutions.drawing_styles.get_default_pose_landmarks_style()
+                )
+                
+                # Detect bow direction from right elbow angle
+                self.detect_bow_from_elbow(pose_results.pose_landmarks, frame)
+            
+            if hand_results.multi_hand_landmarks:
+                for hand_landmarks in hand_results.multi_hand_landmarks:
+                    # Draw hand landmarks
+                    self.mp_drawing.draw_landmarks(
+                        frame, hand_landmarks,
+                        self.mp_hands.HAND_CONNECTIONS,
+                        landmark_drawing_spec=mp.solutions.drawing_styles.get_default_hand_landmarks_style()
+                    )
+            
+            # Convert to RGB and queue for display
+            img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(img)
+            
+            if self.video_queue.full():
+                try:
+                    self.video_queue.get_nowait()
+                except:
+                    pass
+            
+            self.video_queue.put(img)
+        
+        cap.release()
+        self.running = False
+    
+    def calculate_angle(self, a, b, c):
+        """Calculate the angle between three points (a-b-c)"""
+        a = np.array(a)
+        b = np.array(b)
+        c = np.array(c)
+        
+        ba = a - b
+        bc = c - b
+        
+        dot_product = np.dot(ba, bc)
+        magnitude_ba = np.linalg.norm(ba)
+        magnitude_bc = np.linalg.norm(bc)
+        
+        angle_rad = np.arccos(dot_product / (magnitude_ba * magnitude_bc))
+        return np.degrees(angle_rad)
+    
+    def detect_bow_from_elbow(self, landmarks, frame):
+        """Detect bow direction from right elbow angle changes"""
+        # Get right arm landmarks
+        shoulder = landmarks.landmark[self.mp_pose.PoseLandmark.RIGHT_SHOULDER]
+        elbow = landmarks.landmark[self.mp_pose.PoseLandmark.RIGHT_ELBOW]
+        wrist = landmarks.landmark[self.mp_pose.PoseLandmark.RIGHT_WRIST]
+        
+        # Convert to pixel coordinates
+        h, w, _ = frame.shape
+        shoulder_pos = (shoulder.x * w, shoulder.y * h)
+        elbow_pos = (elbow.x * w, elbow.y * h)
+        wrist_pos = (wrist.x * w, wrist.y * h)
+        
+        # Calculate elbow angle
+        current_angle = self.calculate_angle(shoulder_pos, elbow_pos, wrist_pos)
+        self.elbow_label.config(text=f"Elbow Angle: {current_angle:.1f}°")
+        
+        # Draw angle on frame
+        cv2.putText(frame, f"Elbow: {current_angle:.1f}°", (10, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        # Initialize last angle if needed
+        if self.last_elbow_angle is None:
+            self.last_elbow_angle = current_angle
+            return
+        
+        # Track angle history for smoothing
+        self.angle_history.append(current_angle)
+        if len(self.angle_history) > 5:
+            self.angle_history.pop(0)
+        
+        # Use moving average for smoother detection
+        smoothed_angle = sum(self.angle_history) / len(self.angle_history)
+        angle_change = smoothed_angle - self.last_elbow_angle
+        
+        # Detect bow direction based on angle change
+        if abs(angle_change) > 0.5:  # Threshold to avoid small fluctuations
+            if angle_change > 0:
+                new_direction = 'down'  # Angle increasing = down bow
+            else:
+                new_direction = 'up'    # Angle decreasing = up bow
+            
+            # Only register direction change if it's different and some time has passed
+            if (new_direction != self.bow_direction and 
+                time.time() - self.last_bow_change_time > 0.4):  # 400ms debounce
+                
+                self.bow_direction = new_direction
+                self.last_bow_change_time = time.time()
+                self.bow_change_count += 1
+                
+                # Check if this matches the expected rhythm
+                self.check_rhythm_pattern()
+                
+                # Update UI
+                self.window.after(0, self.update_bow_display)
+        
+        self.last_elbow_angle = smoothed_angle
+    
+    def check_rhythm_pattern(self):
+        """Check if bow changes match the Twinkle Twinkle rhythm"""
+        if self.song_position < len(self.twinkle_pattern):
+            expected_direction = self.twinkle_pattern[self.song_position]
+            
+            if self.bow_direction == expected_direction:
+                self.song_position += 1
+                self.update_feedback(f"Correct! {expected_direction.upper()} bow (position {self.song_position}/32)")
+            else:
+                self.update_feedback(f"Expected {expected_direction.upper()} bow but got {self.bow_direction.upper()}")
+        else:
+            self.song_position = 0
+            self.update_feedback("Song completed! Starting over...")
+    
+    def update_bow_display(self):
+        """Update the bow direction display in the UI"""
+        if self.bow_direction:
+            color = "red" if self.bow_direction == 'down' else "blue"
+            self.bow_label.config(text=f"Bow: {self.bow_direction.upper()}", foreground=color)
+            
+            if self.song_position < len(self.twinkle_pattern):
+                expected = self.twinkle_pattern[self.song_position]
+                self.rhythm_label.config(text=f"Next: {expected.upper()}")
+            
+            self.song_label.config(text=f"Position: {self.song_position}/32")
+    
+    def update_feedback(self, message):
+        """Update the feedback text"""
+        self.feedback_text.config(state=tk.NORMAL)
+        self.feedback_text.delete(1.0, tk.END)
+        self.feedback_text.insert(tk.END, message)
+        self.feedback_text.config(state=tk.DISABLED)
+    
+    def update_video_display(self):
+        """Update the video display from the queue"""
+        try:
+            if not self.video_queue.empty():
+                img = self.video_queue.get_nowait()
+                imgtk = ImageTk.PhotoImage(image=img)
+                
+                self.canvas.imgtk = imgtk
+                self.canvas.create_image(0, 0, anchor=tk.NW, image=imgtk)
+        except:
+            pass
+        
+        self.window.after(30, self.update_video_display)
+    
+    def on_close(self):
+        """Clean up resources when closing"""
+        self.running = False
+        if hasattr(self, 'video_thread'):
+            self.video_thread.join(timeout=1)
+        self.window.destroy()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ViolinBowTracker(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_close)
+    root.mainloop()

@@ -16,6 +16,13 @@ class BowDirectionDetector:
         self.last_direction_change = time.time()
         self.debounce_period = 0.4  # Debounce period in seconds (400ms)
         self.current_direction = "Not detected"
+        # Add state detection for smoother transitions between bow states
+        self.state_confidence = {
+            "Up bow": 0,
+            "Down bow": 0,
+            "Holding": 0
+        }
+        self.confidence_threshold = 3  # Number of consistent readings to change state
         
     def detect_bow_direction(self, landmarks, frame=None):
         """
@@ -47,25 +54,53 @@ class BowDirectionDetector:
             return "Calibrating...", current_angle
             
         # Calculate the trend (slope) of the angle change
-        angle_diff = self.angle_history[-1] - self.angle_history[0]
+        # Use a more sophisticated approach to detect trends:
+        # 1. Use the full history for a more stable measurement
+        # 2. Calculate the average rate of change over time
+        angle_changes = [self.angle_history[i] - self.angle_history[i-1] for i in range(1, len(self.angle_history))]
+        avg_change = sum(angle_changes) / len(angle_changes)
         
         # Determine direction based on angle trend
         # Increasing angle = down bow, decreasing angle = up bow
         # Apply a threshold to avoid minor fluctuations
-        threshold = 2.0
+        threshold = 1.5  # Slightly reduced threshold for better sensitivity
         
-        if angle_diff > threshold:
-            direction = "Down bow"
-        elif angle_diff < -threshold:
-            direction = "Up bow"
+        # Increment confidence for the detected direction
+        if avg_change > threshold:
+            detected_direction = "Down bow"
+            self.state_confidence["Down bow"] += 1
+            self.state_confidence["Up bow"] = max(0, self.state_confidence["Up bow"] - 1)
+            self.state_confidence["Holding"] = max(0, self.state_confidence["Holding"] - 1)
+        elif avg_change < -threshold:
+            detected_direction = "Up bow"
+            self.state_confidence["Up bow"] += 1
+            self.state_confidence["Down bow"] = max(0, self.state_confidence["Down bow"] - 1)
+            self.state_confidence["Holding"] = max(0, self.state_confidence["Holding"] - 1)
         else:
-            direction = "Holding"
+            detected_direction = "Holding"
+            self.state_confidence["Holding"] += 1
+            self.state_confidence["Up bow"] = max(0, self.state_confidence["Up bow"] - 1)
+            self.state_confidence["Down bow"] = max(0, self.state_confidence["Down bow"] - 1)
+        
+        # Determine the most confident direction
+        most_confident_direction = max(self.state_confidence, key=self.state_confidence.get)
+        confidence_value = self.state_confidence[most_confident_direction]
+        
+        # Only change direction if confidence exceeds threshold
+        if confidence_value >= self.confidence_threshold:
+            direction = most_confident_direction
+        else:
+            direction = self.current_direction
             
         # Apply debounce to prevent rapid direction changes
         current_time = time.time()
         if direction != self.current_direction and (current_time - self.last_direction_change) > self.debounce_period:
             self.current_direction = direction
             self.last_direction_change = current_time
+            # Reset confidence after a direction change
+            if direction != "Holding":  # Don't reset on holding to allow quick transitions from holding
+                self.state_confidence = {k: 0 for k in self.state_confidence}
+                self.state_confidence[direction] = self.confidence_threshold  # Start with threshold confidence
             
         # Add to direction history
         self.direction_history.append(self.current_direction)
@@ -98,26 +133,47 @@ class BowDirectionDetector:
         # Draw arm with color based on direction
         if direction == "Up bow":
             color = (0, 255, 0)  # Green
+            # Add directional arrow indicator
+            arrow_start = right_elbow
+            arrow_end = (right_elbow[0], right_elbow[1] - 50)  # Arrow pointing up
+            cv2.arrowedLine(frame, arrow_start, arrow_end, color, 3, tipLength=0.4)
         elif direction == "Down bow":
             color = (0, 0, 255)  # Red
+            # Add directional arrow indicator
+            arrow_start = right_elbow
+            arrow_end = (right_elbow[0], right_elbow[1] + 50)  # Arrow pointing down
+            cv2.arrowedLine(frame, arrow_start, arrow_end, color, 3, tipLength=0.4)
         else:
             color = (255, 255, 0)  # Yellow
             
-        # Draw arm lines
-        cv2.line(frame, right_shoulder, right_elbow, color, 2)
-        cv2.line(frame, right_elbow, right_wrist, color, 2)
+        # Draw arm lines with thicker lines for better visibility
+        cv2.line(frame, right_shoulder, right_elbow, color, 3)
+        cv2.line(frame, right_elbow, right_wrist, color, 3)
         
         # Draw angle arc
         self._draw_angle_arc(frame, right_shoulder, right_elbow, right_wrist, angle, color)
         
-        # Add text for angle
+        # Add text for angle with better visibility
         cv2.putText(
             frame, 
             f"Elbow angle: {angle:.1f}°", 
-            (right_elbow[0] - 30, right_elbow[1] - 10), 
+            (right_elbow[0] - 30, right_elbow[1] - 15), 
             cv2.FONT_HERSHEY_SIMPLEX, 
-            0.5, 
+            0.7, 
             color, 
+            2
+        )
+        
+        # Add confidence indicator
+        most_confident = max(self.state_confidence, key=self.state_confidence.get)
+        conf_value = self.state_confidence[most_confident]
+        cv2.putText(
+            frame,
+            f"Confidence: {conf_value}/{self.confidence_threshold}",
+            (10, h - 20),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            color,
             1
         )
     
